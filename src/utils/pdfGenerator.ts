@@ -4,6 +4,7 @@ import { PlacemarkFeature, LatLng, RouteResultDetails } from '../types/kml';
 
 /**
  * Generates formatted text and WhatsApp share URL for a placemark
+ * (Category removed as requested)
  */
 export function createWhatsAppMessage(pm: PlacemarkFeature): string {
   const coords = pm.point ? `${pm.point.lat.toFixed(5)}, ${pm.point.lng.toFixed(5)}` : '';
@@ -12,14 +13,13 @@ export function createWhatsAppMessage(pm: PlacemarkFeature): string {
     : '';
 
   let msg = `📍 *Local:* ${pm.name}\n`;
-  msg += `🏷️ *Categoria:* ${pm.category}\n`;
   if (coords) {
     msg += `📌 *Coordenadas:* ${coords}\n`;
   }
   if (pm.description && pm.description.trim()) {
     const cleanDesc = pm.description.replace(/<[^>]*>/g, '').trim();
     if (cleanDesc) {
-      msg += `📝 *Info:* ${cleanDesc.slice(0, 110)}${cleanDesc.length > 110 ? '...' : ''}\n`;
+      msg += `📝 *Info:* ${cleanDesc.slice(0, 120)}${cleanDesc.length > 120 ? '...' : ''}\n`;
     }
   }
   if (mapsUrl) {
@@ -34,14 +34,13 @@ export function createWhatsAppUrl(pm: PlacemarkFeature): string {
 }
 
 /**
- * Generates an in-memory canvas image representing a stylized mini-map for a coordinate
+ * Generates an in-memory canvas image representing the single Territory Overview Map
+ * showing the boundaries/limits and all chosen locations with their names.
  */
-export function createMiniMapCanvas(
-  point: LatLng,
-  name: string,
-  categoryColor: string,
-  width = 320,
-  height = 180
+export function createOverviewMapCanvas(
+  placemarks: PlacemarkFeature[],
+  width = 1000,
+  height = 460
 ): string {
   const canvas = document.createElement('canvas');
   canvas.width = width;
@@ -49,148 +48,298 @@ export function createMiniMapCanvas(
   const ctx = canvas.getContext('2d');
   if (!ctx) return '';
 
-  // Background map terrain styling (soft warm neutral / topographic tone)
-  ctx.fillStyle = '#f1f5f9';
+  const validPlacemarks = placemarks.filter((p) => p.point);
+  if (validPlacemarks.length === 0) {
+    ctx.fillStyle = '#f8fafc';
+    ctx.fillRect(0, 0, width, height);
+    return canvas.toDataURL('image/png');
+  }
+
+  // Calculate bounding box of all points and any lines/polygons
+  let minLat = 90;
+  let maxLat = -90;
+  let minLng = 180;
+  let maxLng = -180;
+
+  for (const pm of validPlacemarks) {
+    const pts: LatLng[] = [];
+    if (pm.point) pts.push(pm.point);
+    if (pm.lineCoordinates) pts.push(...pm.lineCoordinates);
+    if (pm.polygonCoordinates) {
+      pm.polygonCoordinates.forEach((ring) => pts.push(...ring));
+    }
+
+    for (const pt of pts) {
+      if (pt.lat < minLat) minLat = pt.lat;
+      if (pt.lat > maxLat) maxLat = pt.lat;
+      if (pt.lng < minLng) minLng = pt.lng;
+      if (pt.lng > maxLng) maxLng = pt.lng;
+    }
+  }
+
+  // Ensure minimum span so single points or points in line don't divide by zero
+  let spanLat = maxLat - minLat;
+  let spanLng = maxLng - minLng;
+  if (spanLat < 0.01) spanLat = 0.02;
+  if (spanLng < 0.01) spanLng = 0.02;
+
+  // Add 16% margin around boundaries for labels and pins
+  const padLat = spanLat * 0.16;
+  const padLng = spanLng * 0.16;
+  const boundMinLat = minLat - padLat;
+  const boundMaxLat = maxLat + padLat;
+  const boundMinLng = minLng - padLng;
+  const boundMaxLng = maxLng + padLng;
+
+  // Projection helper
+  const padX = 46;
+  const padY = 46;
+  const plotWidth = width - padX * 2;
+  const plotHeight = height - padY * 2;
+
+  const project = (pt: LatLng) => {
+    const x = padX + ((pt.lng - boundMinLng) / (boundMaxLng - boundMinLng)) * plotWidth;
+    const y = padY + (1 - (pt.lat - boundMinLat) / (boundMaxLat - boundMinLat)) * plotHeight;
+    return { x, y };
+  };
+
+  // 1. Map Canvas Background
+  ctx.fillStyle = '#f8fafc';
   ctx.fillRect(0, 0, width, height);
 
-  // Decorative map grid / road grid lines
+  // Decorative coordinate grid
   ctx.strokeStyle = '#e2e8f0';
   ctx.lineWidth = 1;
-  const gridSize = 24;
-  for (let x = 0; x < width; x += gridSize) {
+  const gridSteps = 6;
+  for (let i = 1; i < gridSteps; i++) {
+    const gx = padX + (plotWidth / gridSteps) * i;
     ctx.beginPath();
-    ctx.moveTo(x, 0);
-    ctx.lineTo(x, height);
+    ctx.moveTo(gx, padY);
+    ctx.lineTo(gx, height - padY);
+    ctx.stroke();
+
+    const gy = padY + (plotHeight / gridSteps) * i;
+    ctx.beginPath();
+    ctx.moveTo(padX, gy);
+    ctx.lineTo(width - padX, gy);
     ctx.stroke();
   }
-  for (let y = 0; y < height; y += gridSize) {
-    ctx.beginPath();
-    ctx.moveTo(0, y);
-    ctx.lineTo(width, y);
-    ctx.stroke();
+
+  // 2. Draw Territory Boundary Limits Frame
+  const topLeft = project({ lat: maxLat, lng: minLng });
+  const bottomRight = project({ lat: minLat, lng: maxLng });
+  const boxX = Math.min(topLeft.x, bottomRight.x) - 10;
+  const boxY = Math.min(topLeft.y, bottomRight.y) - 10;
+  const boxW = Math.abs(bottomRight.x - topLeft.x) + 20;
+  const boxH = Math.abs(bottomRight.y - topLeft.y) + 20;
+
+  // Shaded territory area
+  ctx.fillStyle = 'rgba(37, 99, 235, 0.035)';
+  ctx.fillRect(boxX, boxY, boxW, boxH);
+
+  // Dashed boundary line
+  ctx.strokeStyle = '#2563eb';
+  ctx.lineWidth = 1.6;
+  ctx.setLineDash([6, 4]);
+  ctx.strokeRect(boxX, boxY, boxW, boxH);
+  ctx.setLineDash([]);
+
+  // Boundary tag label in corner of limit box
+  ctx.fillStyle = 'rgba(37, 99, 235, 0.85)';
+  ctx.font = 'bold 9px sans-serif';
+  ctx.fillText('⛶ LIMITES DO TERRITÓRIO', boxX + 6, Math.max(boxY - 4, 18));
+
+  // 3. Draw Lines / Polygons if present in placemarks
+  for (const pm of validPlacemarks) {
+    if (pm.polygonCoordinates) {
+      for (const ring of pm.polygonCoordinates) {
+        if (ring.length > 2) {
+          ctx.beginPath();
+          const start = project(ring[0]);
+          ctx.moveTo(start.x, start.y);
+          for (let k = 1; k < ring.length; k++) {
+            const p = project(ring[k]);
+            ctx.lineTo(p.x, p.y);
+          }
+          ctx.closePath();
+          ctx.fillStyle = 'rgba(16, 185, 129, 0.12)';
+          ctx.fill();
+          ctx.strokeStyle = '#10b981';
+          ctx.lineWidth = 2;
+          ctx.stroke();
+        }
+      }
+    }
+
+    if (pm.lineCoordinates && pm.lineCoordinates.length > 1) {
+      ctx.beginPath();
+      const start = project(pm.lineCoordinates[0]);
+      ctx.moveTo(start.x, start.y);
+      for (let k = 1; k < pm.lineCoordinates.length; k++) {
+        const p = project(pm.lineCoordinates[k]);
+        ctx.lineTo(p.x, p.y);
+      }
+      ctx.strokeStyle = '#0284c7';
+      ctx.lineWidth = 2.5;
+      ctx.stroke();
+    }
   }
 
-  // Simulated road vectors
-  ctx.strokeStyle = '#cbd5e1';
-  ctx.lineWidth = 3;
-  ctx.beginPath();
-  ctx.moveTo(0, height * 0.45);
-  ctx.bezierCurveTo(width * 0.3, height * 0.4, width * 0.6, height * 0.6, width, height * 0.5);
-  ctx.stroke();
+  // 4. Draw Connecting Route Line between Points
+  if (validPlacemarks.length > 1) {
+    ctx.strokeStyle = 'rgba(148, 163, 184, 0.5)';
+    ctx.lineWidth = 1.2;
+    ctx.setLineDash([4, 4]);
+    ctx.beginPath();
+    const firstPt = project(validPlacemarks[0].point!);
+    ctx.moveTo(firstPt.x, firstPt.y);
+    for (let i = 1; i < validPlacemarks.length; i++) {
+      const nextPt = project(validPlacemarks[i].point!);
+      ctx.lineTo(nextPt.x, nextPt.y);
+    }
+    ctx.stroke();
+    ctx.setLineDash([]);
+  }
 
-  ctx.strokeStyle = '#cbd5e1';
-  ctx.lineWidth = 2.5;
-  ctx.beginPath();
-  ctx.moveTo(width * 0.4, 0);
-  ctx.bezierCurveTo(width * 0.45, height * 0.3, width * 0.55, height * 0.7, width * 0.6, height);
-  ctx.stroke();
+  // 5. Draw Location Pins and Names
+  validPlacemarks.forEach((pm, idx) => {
+    if (!pm.point) return;
+    const { x, y } = project(pm.point);
+    const color = pm.categoryColor || '#2563eb';
 
-  // Secondary avenues
-  ctx.strokeStyle = '#ffffff';
-  ctx.lineWidth = 1.8;
-  ctx.beginPath();
-  ctx.moveTo(0, height * 0.45);
-  ctx.bezierCurveTo(width * 0.3, height * 0.4, width * 0.6, height * 0.6, width, height * 0.5);
-  ctx.stroke();
+    // Halo pulse around pin
+    ctx.beginPath();
+    ctx.arc(x, y, 11, 0, Math.PI * 2);
+    ctx.fillStyle = color + '28';
+    ctx.fill();
 
-  ctx.beginPath();
-  ctx.moveTo(width * 0.4, 0);
-  ctx.bezierCurveTo(width * 0.45, height * 0.3, width * 0.55, height * 0.7, width * 0.6, height);
-  ctx.stroke();
+    // Solid pin circle
+    ctx.beginPath();
+    ctx.arc(x, y, 7, 0, Math.PI * 2);
+    ctx.fillStyle = color;
+    ctx.fill();
+    ctx.strokeStyle = '#ffffff';
+    ctx.lineWidth = 2;
+    ctx.stroke();
 
-  // Simulated water body / park area in corner
-  ctx.fillStyle = '#e0f2fe';
+    // Pin index number inside
+    ctx.fillStyle = '#ffffff';
+    ctx.font = 'bold 8px sans-serif';
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'middle';
+    ctx.fillText(`${idx + 1}`, x, y);
+
+    // Label with location name
+    const labelText = `${idx + 1}. ${pm.name}`;
+    ctx.font = 'bold 11px sans-serif';
+    const textWidth = ctx.measureText(labelText).width;
+    const pillW = textWidth + 14;
+    const pillH = 19;
+
+    // Alternate label position (top, bottom, right) to prevent overlap
+    let pillX = x + 10;
+    let pillY = y - 9;
+    if (idx % 2 === 1) {
+      pillY = y + 10;
+    }
+    if (pillX + pillW > width - 12) {
+      pillX = x - pillW - 10;
+    }
+    if (pillY < 12) {
+      pillY = y + 12;
+    }
+    if (pillY + pillH > height - 12) {
+      pillY = y - pillH - 8;
+    }
+
+    // Label shadow
+    ctx.fillStyle = 'rgba(0, 0, 0, 0.08)';
+    ctx.beginPath();
+    ctx.roundRect(pillX + 1, pillY + 1, pillW, pillH, 5);
+    ctx.fill();
+
+    // Label pill background
+    ctx.fillStyle = '#ffffff';
+    ctx.beginPath();
+    ctx.roundRect(pillX, pillY, pillW, pillH, 5);
+    ctx.fill();
+    ctx.strokeStyle = color;
+    ctx.lineWidth = 1.3;
+    ctx.stroke();
+
+    // Small category indicator dot inside pill
+    ctx.fillStyle = color;
+    ctx.beginPath();
+    ctx.arc(pillX + 6, pillY + pillH / 2, 3, 0, Math.PI * 2);
+    ctx.fill();
+
+    // Location name text
+    ctx.fillStyle = '#0f172a';
+    ctx.textAlign = 'left';
+    ctx.textBaseline = 'middle';
+    ctx.fillText(labelText, pillX + 13, pillY + pillH / 2);
+  });
+
+  // 6. Header Banner inside Map
+  ctx.fillStyle = 'rgba(15, 23, 42, 0.9)';
   ctx.beginPath();
-  ctx.arc(width * 0.15, height * 0.85, 45, 0, Math.PI * 2);
+  ctx.roundRect(10, 10, 310, 24, 6);
   ctx.fill();
 
-  // Target Location Pin (Center)
-  const cx = width / 2;
-  const cy = height / 2;
-
-  // Outer glow / radar ring
-  ctx.strokeStyle = categoryColor || '#2563eb';
-  ctx.lineWidth = 1.5;
-  ctx.beginPath();
-  ctx.arc(cx, cy, 22, 0, Math.PI * 2);
-  ctx.stroke();
-
-  ctx.fillStyle = (categoryColor || '#2563eb') + '22';
-  ctx.beginPath();
-  ctx.arc(cx, cy, 22, 0, Math.PI * 2);
-  ctx.fill();
-
-  // Pin circle
-  ctx.fillStyle = categoryColor || '#2563eb';
-  ctx.beginPath();
-  ctx.arc(cx, cy - 6, 9, 0, Math.PI * 2);
-  ctx.fill();
-
-  // White inner dot
   ctx.fillStyle = '#ffffff';
-  ctx.beginPath();
-  ctx.arc(cx, cy - 6, 3.5, 0, Math.PI * 2);
-  ctx.fill();
+  ctx.font = 'bold 10px sans-serif';
+  ctx.textAlign = 'left';
+  ctx.textBaseline = 'middle';
+  ctx.fillText('MAPA DE LIMITES DO TERRITÓRIO E LOCALIDADES', 18, 22);
 
-  // Pin pointer
-  ctx.fillStyle = categoryColor || '#2563eb';
-  ctx.beginPath();
-  ctx.moveTo(cx - 5, cy - 3);
-  ctx.lineTo(cx, cy + 5);
-  ctx.lineTo(cx + 5, cy - 3);
-  ctx.closePath();
-  ctx.fill();
-
-  // Compass Rose in top-right
-  ctx.fillStyle = 'rgba(255, 255, 255, 0.85)';
-  ctx.fillRect(width - 32, 6, 26, 26);
-  ctx.strokeStyle = '#94a3b8';
+  // 7. Compass Rose (Top-Right)
+  ctx.fillStyle = 'rgba(255, 255, 255, 0.9)';
+  ctx.strokeStyle = '#cbd5e1';
   ctx.lineWidth = 1;
-  ctx.strokeRect(width - 32, 6, 26, 26);
+  ctx.beginPath();
+  ctx.roundRect(width - 38, 10, 28, 28, 6);
+  ctx.fill();
+  ctx.stroke();
 
   ctx.fillStyle = '#dc2626';
   ctx.font = 'bold 9px sans-serif';
   ctx.textAlign = 'center';
-  ctx.fillText('N', width - 19, 17);
+  ctx.textBaseline = 'alphabetic';
+  ctx.fillText('N', width - 24, 21);
   ctx.fillStyle = '#64748b';
   ctx.beginPath();
-  ctx.moveTo(width - 19, 19);
-  ctx.lineTo(width - 23, 27);
-  ctx.lineTo(width - 15, 27);
+  ctx.moveTo(width - 24, 23);
+  ctx.lineTo(width - 28, 32);
+  ctx.lineTo(width - 20, 32);
   ctx.closePath();
   ctx.fill();
 
-  // Coordinates badge bottom-left
-  ctx.fillStyle = 'rgba(15, 23, 42, 0.85)';
-  const coordText = `${point.lat.toFixed(4)}, ${point.lng.toFixed(4)}`;
-  ctx.font = '10px monospace';
-  const textWidth = ctx.measureText(coordText).width;
-  ctx.fillRect(6, height - 22, textWidth + 12, 16);
-  ctx.fillStyle = '#ffffff';
-  ctx.textAlign = 'left';
-  ctx.fillText(coordText, 12, height - 10);
-
-  // Scale indicator bottom-right
-  ctx.fillStyle = '#475569';
-  ctx.font = '8px sans-serif';
-  ctx.textAlign = 'right';
-  ctx.fillText('500 m', width - 8, height - 12);
-  ctx.strokeStyle = '#475569';
-  ctx.lineWidth = 1.5;
+  // 8. Bottom Coordinates Bar
+  const coordInfo = `Extensão: Lat ${minLat.toFixed(4)}° a ${maxLat.toFixed(4)}° | Lng ${minLng.toFixed(4)}° a ${maxLng.toFixed(4)}° • ${validPlacemarks.length} localidades`;
+  ctx.fillStyle = 'rgba(15, 23, 42, 0.8)';
   ctx.beginPath();
-  ctx.moveTo(width - 45, height - 7);
-  ctx.lineTo(width - 8, height - 7);
-  ctx.moveTo(width - 45, height - 10);
-  ctx.lineTo(width - 45, height - 4);
-  ctx.moveTo(width - 8, height - 10);
-  ctx.lineTo(width - 8, height - 4);
-  ctx.stroke();
+  ctx.roundRect(10, height - 24, ctx.measureText(coordInfo).width + 18, 18, 4);
+  ctx.fill();
+
+  ctx.fillStyle = '#ffffff';
+  ctx.font = '9px monospace';
+  ctx.textAlign = 'left';
+  ctx.textBaseline = 'middle';
+  ctx.fillText(coordInfo, 18, height - 15);
+
+  // Outer border of entire canvas
+  ctx.strokeStyle = '#0f172a';
+  ctx.lineWidth = 2;
+  ctx.strokeRect(1, 1, width - 2, height - 2);
 
   return canvas.toDataURL('image/png');
 }
 
 /**
  * Generates and downloads a clean, professional PDF with interactive Google Maps links
+ * - Features ONLY ONE single Territory Limits Overview Map at the beginning of the PDF.
+ * - Does NOT include mini-maps on each individual location card.
+ * - Each card has clickable Google Maps & WhatsApp links.
  */
 export async function generateAndDownloadPdf({
   title,
@@ -218,17 +367,17 @@ export async function generateAndDownloadPdf({
 
   let cursorY = margin;
 
-  // Header Banner
+  // 1. Header Banner
   doc.setFillColor(15, 23, 42); // slate-900
-  doc.rect(margin, cursorY, contentWidth, 24, 'F');
+  doc.rect(margin, cursorY, contentWidth, 22, 'F');
 
   doc.setTextColor(255, 255, 255);
   doc.setFont('helvetica', 'bold');
-  doc.setFontSize(14);
-  doc.text(title.slice(0, 48), margin + 8, cursorY + 11);
+  doc.setFontSize(13);
+  doc.text(title.slice(0, 52), margin + 8, cursorY + 10);
 
   doc.setFont('helvetica', 'normal');
-  doc.setFontSize(8.5);
+  doc.setFontSize(8);
   doc.setTextColor(148, 163, 184); // slate-400
   const dateStr = new Date().toLocaleDateString('pt-BR', {
     day: '2-digit',
@@ -238,39 +387,60 @@ export async function generateAndDownloadPdf({
     minute: '2-digit',
   });
   doc.text(
-    `Gerado em: ${dateStr} • ${placemarks.length} localidades • Links de rota do Google Maps inclusos`,
+    `Gerado em: ${dateStr} • ${placemarks.length} localidades • Links de rota e WhatsApp inclusos`,
     margin + 8,
-    cursorY + 18
+    cursorY + 17
   );
 
-  cursorY += 28;
+  cursorY += 26;
 
-  // Route Info (if route is active)
+  // 2. Route Info (if route is active)
   if (routeDetails && origin) {
     doc.setFillColor(240, 249, 255); // sky-50
     doc.setDrawColor(186, 230, 253); // sky-200
-    doc.roundedRect(margin, cursorY, contentWidth, 14, 2, 2, 'FD');
+    doc.roundedRect(margin, cursorY, contentWidth, 13, 2, 2, 'FD');
 
     doc.setFont('helvetica', 'bold');
-    doc.setFontSize(9);
+    doc.setFontSize(8.5);
     doc.setTextColor(3, 105, 161); // sky-700
-    doc.text('Rota Ativa no Mapa:', margin + 4, cursorY + 6);
+    doc.text('Rota Ativa no Mapa:', margin + 4, cursorY + 5.5);
 
     doc.setFont('helvetica', 'normal');
-    doc.setFontSize(8);
+    doc.setFontSize(7.8);
     doc.setTextColor(51, 65, 85); // slate-700
     doc.text(
       `Partida: ${originLabel} | Distância: ${routeDetails.distanceText} | Tempo: ${routeDetails.durationText}`,
       margin + 4,
-      cursorY + 11
+      cursorY + 10.5
     );
 
-    cursorY += 18;
+    cursorY += 16;
   }
 
-  // Pre-generate QR codes and mini-maps for each placemark
-  const cardHeight = 44;
-  const cardsPerPage = Math.floor((pageHeight - cursorY - margin) / (cardHeight + 4));
+  // 3. SINGLE TERRITORY LIMITS OVERVIEW MAP (ONLY AT THE BEGINNING OF THE PDF)
+  const overviewMapHeight = 74; // mm
+  try {
+    const overviewImg = createOverviewMapCanvas(placemarks, 1000, 460);
+    doc.addImage(overviewImg, 'PNG', margin, cursorY, contentWidth, overviewMapHeight);
+
+    // Section title beneath overview map
+    cursorY += overviewMapHeight + 6;
+  } catch (err) {
+    console.warn('Falha ao renderizar mapa geral de visão', err);
+  }
+
+  // Divider banner
+  doc.setFillColor(241, 245, 249); // slate-100
+  doc.roundedRect(margin, cursorY, contentWidth, 7, 1, 1, 'F');
+  doc.setFont('helvetica', 'bold');
+  doc.setFontSize(8);
+  doc.setTextColor(71, 85, 105); // slate-600
+  doc.text('LOCALIDADES DO TERRITÓRIO (DETALHES E LINKS DIRETOS)', margin + 4, cursorY + 4.8);
+
+  cursorY += 10;
+
+  // 4. Compact placemark cards (NO MINI-MAPS IN INDIVIDUAL CARDS)
+  const cardHeight = 27; // mm
 
   for (let i = 0; i < placemarks.length; i++) {
     const pm = placemarks[i];
@@ -281,14 +451,14 @@ export async function generateAndDownloadPdf({
       doc.addPage();
       cursorY = margin;
 
-      // Small header on continuation pages
+      // Small continuation header
       doc.setFillColor(241, 245, 249);
-      doc.rect(margin, cursorY, contentWidth, 8, 'F');
+      doc.rect(margin, cursorY, contentWidth, 7, 'F');
       doc.setFont('helvetica', 'bold');
-      doc.setFontSize(8);
+      doc.setFontSize(7.5);
       doc.setTextColor(100, 116, 139);
-      doc.text(`${title} (continuação)`, margin + 4, cursorY + 5.5);
-      cursorY += 12;
+      doc.text(`${title} (continuação - localidades)`, margin + 4, cursorY + 4.8);
+      cursorY += 11;
     }
 
     const mapsUrl = `https://www.google.com/maps/dir/?api=1&destination=${pm.point.lat},${pm.point.lng}`;
@@ -297,131 +467,91 @@ export async function generateAndDownloadPdf({
     // Card background
     doc.setFillColor(255, 255, 255);
     doc.setDrawColor(226, 232, 240); // slate-200
-    doc.roundedRect(margin, cursorY, contentWidth, cardHeight, 2, 2, 'FD');
+    doc.roundedRect(margin, cursorY, contentWidth, cardHeight, 1.5, 1.5, 'FD');
 
-    // 1. Mini-map canvas
-    const miniMapData = createMiniMapCanvas(
-      pm.point,
-      pm.name,
-      pm.categoryColor || '#2563eb',
-      240,
-      140
-    );
-    const mapW = 42;
-    const mapH = 24.5;
-    try {
-      doc.addImage(miniMapData, 'PNG', margin + 3, cursorY + 4, mapW, mapH);
-    } catch (e) {
-      console.warn('Mini-map embed error', e);
-    }
+    // Accent left stripe with category color
+    doc.setFillColor(pm.categoryColor || '#2563eb');
+    doc.roundedRect(margin, cursorY, 3, cardHeight, 1.5, 1.5, 'F');
 
-    // 2. Placemark details
-    const textStartX = margin + mapW + 6;
-    const textAvailableWidth = contentWidth - mapW - 32;
-
-    // Index & Name
+    // Index number badge
+    const badgeX = margin + 6;
+    const badgeY = cursorY + 4;
+    doc.setFillColor(15, 23, 42); // slate-900
+    doc.roundedRect(badgeX, badgeY, 7, 7, 1.2, 1.2, 'F');
     doc.setFont('helvetica', 'bold');
-    doc.setFontSize(10);
-    doc.setTextColor(15, 23, 42); // slate-900
-    const displayName = `${i + 1}. ${pm.name}`;
-    doc.text(displayName.slice(0, 42), textStartX, cursorY + 8);
+    doc.setFontSize(7);
+    doc.setTextColor(255, 255, 255);
+    doc.text(`${i + 1}`, badgeX + 3.5, badgeY + 4.8, { align: 'center' });
 
-    // Category badge text
+    // Location Name
+    const textStartX = badgeX + 10;
     doc.setFont('helvetica', 'bold');
-    doc.setFontSize(7.5);
-    doc.setTextColor(37, 99, 235); // blue-600
-    doc.text(`[${pm.category}]`, textStartX, cursorY + 13.5);
+    doc.setFontSize(9.5);
+    doc.setTextColor(15, 23, 42);
+    doc.text(pm.name.slice(0, 52), textStartX, cursorY + 8.5);
 
     // Coordinates
     doc.setFont('courier', 'normal');
     doc.setFontSize(7.5);
-    doc.setTextColor(100, 116, 139); // slate-500
+    doc.setTextColor(100, 116, 139);
     doc.text(
       `Lat: ${pm.point.lat.toFixed(5)}, Lng: ${pm.point.lng.toFixed(5)}`,
       textStartX,
-      cursorY + 19
+      cursorY + 14
     );
 
-    // Interactive clickable Link Buttons: Google Maps (Blue) + WhatsApp (Green)
+    // Clickable Action Buttons: Google Maps (Blue) + WhatsApp (Green)
+    const btnY = cursorY + 17.5;
+    const btnH = 6.8;
+
+    // 1. Google Maps Route Button (Blue)
     const btnMapsX = textStartX;
-    const btnMapsY = cursorY + 22.5;
     const btnMapsW = 46;
-    const btnMapsH = 7.5;
-
     doc.setFillColor(37, 99, 235); // blue-600
-    doc.roundedRect(btnMapsX, btnMapsY, btnMapsW, btnMapsH, 1.2, 1.2, 'F');
+    doc.roundedRect(btnMapsX, btnY, btnMapsW, btnH, 1.2, 1.2, 'F');
     doc.setFont('helvetica', 'bold');
     doc.setFontSize(6.8);
     doc.setTextColor(255, 255, 255);
-    doc.text('Rota Google Maps >', btnMapsX + 3.5, btnMapsY + 5);
-    doc.link(btnMapsX, btnMapsY, btnMapsW, btnMapsH, { url: mapsUrl });
+    doc.text('Rota Google Maps >', btnMapsX + 4, btnY + 4.6);
+    doc.link(btnMapsX, btnY, btnMapsW, btnH, { url: mapsUrl });
 
-    // WhatsApp button
-    const btnWaX = btnMapsX + btnMapsW + 2.5;
-    const btnWaY = cursorY + 22.5;
+    // 2. WhatsApp Button (Green)
+    const btnWaX = btnMapsX + btnMapsW + 3;
     const btnWaW = 48;
-    const btnWaH = 7.5;
-
     doc.setFillColor(22, 163, 74); // emerald-600 / whatsapp
-    doc.roundedRect(btnWaX, btnWaY, btnWaW, btnWaH, 1.2, 1.2, 'F');
+    doc.roundedRect(btnWaX, btnY, btnWaW, btnH, 1.2, 1.2, 'F');
     doc.setFont('helvetica', 'bold');
     doc.setFontSize(6.8);
     doc.setTextColor(255, 255, 255);
-    doc.text('Enviar no WhatsApp >', btnWaX + 3.5, btnWaY + 5);
-    doc.link(btnWaX, btnWaY, btnWaW, btnWaH, { url: waUrl });
+    doc.text('Enviar no WhatsApp >', btnWaX + 4, btnY + 4.6);
+    doc.link(btnWaX, btnY, btnWaW, btnH, { url: waUrl });
 
-    // Direct clickable link labels below buttons
-    doc.setFont('helvetica', 'normal');
-    doc.setFontSize(6);
-    doc.setTextColor(22, 163, 74);
-    doc.textWithLink('Compartilhar via WhatsApp', textStartX, cursorY + 35, {
-      url: waUrl,
-    });
-    doc.setTextColor(148, 163, 184);
-    doc.textWithLink('• Abrir Navegação GPS', textStartX + 35, cursorY + 35, {
-      url: mapsUrl,
-    });
-
-    // 3. QR Code (Right side of card)
+    // QR Code (Right side of card)
     try {
       const qrDataUrl = await QRCode.toDataURL(mapsUrl, {
-        width: 90,
+        width: 80,
         margin: 1,
         color: { dark: '#0f172a', light: '#ffffff' },
       });
-      const qrSize = 22;
+      const qrSize = 19;
       const qrX = margin + contentWidth - qrSize - 4;
       const qrY = cursorY + 4;
       doc.addImage(qrDataUrl, 'PNG', qrX, qrY, qrSize, qrSize);
 
       doc.setFont('helvetica', 'normal');
-      doc.setFontSize(5.5);
+      doc.setFontSize(5);
       doc.setTextColor(148, 163, 184);
-      doc.text('Ler no celular', qrX + 3, qrY + qrSize + 4);
+      doc.text('Rota no celular', qrX + 1.5, qrY + qrSize + 3);
     } catch (e) {
       console.warn('QR code embed error', e);
     }
 
-    cursorY += cardHeight + 4;
+    cursorY += cardHeight + 3.5;
   }
 
-  // Page numbering footer
-  const totalPages = doc.getNumberOfPages();
-  for (let p = 1; p <= totalPages; p++) {
-    doc.setPage(p);
-    doc.setFont('helvetica', 'normal');
-    doc.setFontSize(7);
-    doc.setTextColor(148, 163, 184);
-    doc.text(
-      `Página ${p} de ${totalPages} • KMZ Viewer • Clique no botão azul de qualquer local para navegar no Google Maps`,
-      pageWidth / 2,
-      pageHeight - 6,
-      { align: 'center' }
-    );
-  }
-
-  // Save and download PDF
-  const safeFilename =
-    title.toLowerCase().replace(/[^a-z0-9_-]/gi, '_').slice(0, 32) || 'mapa_rotas';
-  doc.save(`${safeFilename}.pdf`);
+  // Save/Download PDF
+  const safeName = (title || 'mapa_territorio')
+    .toLowerCase()
+    .replace(/[^a-z0-9_-]/g, '_');
+  doc.save(`${safeName}.pdf`);
 }
