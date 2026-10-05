@@ -1,0 +1,6 @@
+{
+  "name": "KMZ Viewer & Rotas no Mapa",
+  "description": "Visualizador interativo de arquivos KMZ e KML com filtros por categoria, detalhes em pop-up e rotas no Google Maps a partir da localização atual ou ponto escolhido.",
+  "requestFramePermissions": ["geolocation"],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
