@@ -3,6 +3,37 @@ import QRCode from 'qrcode';
 import { PlacemarkFeature, LatLng, RouteResultDetails } from '../types/kml';
 
 /**
+ * Generates formatted text and WhatsApp share URL for a placemark
+ */
+export function createWhatsAppMessage(pm: PlacemarkFeature): string {
+  const coords = pm.point ? `${pm.point.lat.toFixed(5)}, ${pm.point.lng.toFixed(5)}` : '';
+  const mapsUrl = pm.point
+    ? `https://www.google.com/maps/dir/?api=1&destination=${pm.point.lat},${pm.point.lng}`
+    : '';
+
+  let msg = `📍 *Local:* ${pm.name}\n`;
+  msg += `🏷️ *Categoria:* ${pm.category}\n`;
+  if (coords) {
+    msg += `📌 *Coordenadas:* ${coords}\n`;
+  }
+  if (pm.description && pm.description.trim()) {
+    const cleanDesc = pm.description.replace(/<[^>]*>/g, '').trim();
+    if (cleanDesc) {
+      msg += `📝 *Info:* ${cleanDesc.slice(0, 110)}${cleanDesc.length > 110 ? '...' : ''}\n`;
+    }
+  }
+  if (mapsUrl) {
+    msg += `🗺️ *Traçar rota no Google Maps:*\n${mapsUrl}`;
+  }
+  return msg;
+}
+
+export function createWhatsAppUrl(pm: PlacemarkFeature): string {
+  const text = createWhatsAppMessage(pm);
+  return `https://api.whatsapp.com/send?text=${encodeURIComponent(text)}`;
+}
+
+/**
  * Generates an in-memory canvas image representing a stylized mini-map for a coordinate
  */
 export function createMiniMapCanvas(
@@ -261,6 +292,7 @@ export async function generateAndDownloadPdf({
     }
 
     const mapsUrl = `https://www.google.com/maps/dir/?api=1&destination=${pm.point.lat},${pm.point.lng}`;
+    const waUrl = createWhatsAppUrl(pm);
 
     // Card background
     doc.setFillColor(255, 255, 255);
@@ -310,28 +342,43 @@ export async function generateAndDownloadPdf({
       cursorY + 19
     );
 
-    // Interactive clickable Link Button
-    const btnX = textStartX;
-    const btnY = cursorY + 23;
-    const btnW = 68;
-    const btnH = 8;
+    // Interactive clickable Link Buttons: Google Maps (Blue) + WhatsApp (Green)
+    const btnMapsX = textStartX;
+    const btnMapsY = cursorY + 22.5;
+    const btnMapsW = 46;
+    const btnMapsH = 7.5;
 
     doc.setFillColor(37, 99, 235); // blue-600
-    doc.roundedRect(btnX, btnY, btnW, btnH, 1.5, 1.5, 'F');
-
+    doc.roundedRect(btnMapsX, btnMapsY, btnMapsW, btnMapsH, 1.2, 1.2, 'F');
     doc.setFont('helvetica', 'bold');
-    doc.setFontSize(7.5);
+    doc.setFontSize(6.8);
     doc.setTextColor(255, 255, 255);
-    doc.text('Abrir Rota no Google Maps >', btnX + 4, btnY + 5.5);
+    doc.text('Rota Google Maps >', btnMapsX + 3.5, btnMapsY + 5);
+    doc.link(btnMapsX, btnMapsY, btnMapsW, btnMapsH, { url: mapsUrl });
 
-    // Embed the clickable hyperlink annotation in PDF
-    doc.link(btnX, btnY, btnW, btnH, { url: mapsUrl });
+    // WhatsApp button
+    const btnWaX = btnMapsX + btnMapsW + 2.5;
+    const btnWaY = cursorY + 22.5;
+    const btnWaW = 48;
+    const btnWaH = 7.5;
 
-    // Also add url text below button
+    doc.setFillColor(22, 163, 74); // emerald-600 / whatsapp
+    doc.roundedRect(btnWaX, btnWaY, btnWaW, btnWaH, 1.2, 1.2, 'F');
+    doc.setFont('helvetica', 'bold');
+    doc.setFontSize(6.8);
+    doc.setTextColor(255, 255, 255);
+    doc.text('Enviar no WhatsApp >', btnWaX + 3.5, btnWaY + 5);
+    doc.link(btnWaX, btnWaY, btnWaW, btnWaH, { url: waUrl });
+
+    // Direct clickable link labels below buttons
     doc.setFont('helvetica', 'normal');
     doc.setFontSize(6);
+    doc.setTextColor(22, 163, 74);
+    doc.textWithLink('Compartilhar via WhatsApp', textStartX, cursorY + 35, {
+      url: waUrl,
+    });
     doc.setTextColor(148, 163, 184);
-    doc.textWithLink('Link: ' + mapsUrl.slice(0, 52) + '...', btnX, cursorY + 35, {
+    doc.textWithLink('• Abrir Navegação GPS', textStartX + 35, cursorY + 35, {
       url: mapsUrl,
     });
 

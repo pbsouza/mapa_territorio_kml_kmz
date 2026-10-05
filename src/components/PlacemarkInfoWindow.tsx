@@ -1,7 +1,8 @@
 import { useState } from 'react';
 import { InfoWindow } from '@vis.gl/react-google-maps';
 import { PlacemarkFeature } from '../types/kml';
-import { Navigation, Flag, ExternalLink, Copy, Check, Layers } from 'lucide-react';
+import { Navigation, Flag, ExternalLink, Copy, Check, Layers, MessageSquare } from 'lucide-react';
+import { createWhatsAppUrl } from '../utils/pdfGenerator';
 
 interface PlacemarkInfoWindowProps {
   placemark: PlacemarkFeature | null;
@@ -125,7 +126,17 @@ export function PlacemarkInfoWindow({
           </button>
         </div>
 
-        <div className="mt-2 text-center">
+        <div className="mt-2.5 flex items-center justify-center gap-3">
+          <a
+            href={createWhatsAppUrl(placemark)}
+            target="_blank"
+            rel="noopener noreferrer"
+            className="inline-flex items-center gap-1 text-[11px] text-emerald-600 hover:text-emerald-700 font-medium transition-colors"
+          >
+            <MessageSquare className="w-3 h-3 text-emerald-600" />
+            <span>Enviar no WhatsApp</span>
+          </a>
+          <span className="text-slate-300">•</span>
           <a
             href={googleMapsUrl}
             target="_blank"
@@ -133,7 +144,7 @@ export function PlacemarkInfoWindow({
             className="inline-flex items-center gap-1 text-[11px] text-slate-500 hover:text-blue-600 transition-colors"
           >
             <ExternalLink className="w-3 h-3" />
-            <span>Ver no Google Maps externo</span>
+            <span>Google Maps</span>
           </a>
         </div>
       </div>

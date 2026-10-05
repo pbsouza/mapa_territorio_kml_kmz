@@ -16,9 +16,14 @@ import {
   Square,
   Sparkles,
   Info,
+  MessageSquare,
 } from 'lucide-react';
 import { PlacemarkFeature, LatLng, RouteResultDetails } from '../types/kml';
-import { createMiniMapCanvas, generateAndDownloadPdf } from '../utils/pdfGenerator';
+import {
+  createMiniMapCanvas,
+  generateAndDownloadPdf,
+  createWhatsAppUrl,
+} from '../utils/pdfGenerator';
 
 interface PrintModalProps {
   isOpen: boolean;
@@ -218,6 +223,7 @@ export function PrintModal({
     const cardsHtml = selectedPlacemarks
       .map((pm, idx) => {
         const url = getMapsUrl(pm);
+        const waUrl = createWhatsAppUrl(pm);
         const mapImg = miniMapImages[pm.id] || '';
         const qrImg = qrCodeMap[pm.id] || '';
         return `
@@ -227,9 +233,12 @@ export function PrintModal({
             <div style="font-size: 16px; font-weight: bold; color: #0f172a;">${idx + 1}. ${pm.name}</div>
             <div style="font-size: 12px; color: ${pm.categoryColor || '#2563eb'}; font-weight: bold; margin-top: 4px;">${pm.category}</div>
             <div style="font-size: 12px; font-family: monospace; color: #64748b; margin-top: 4px;">Lat: ${pm.point?.lat.toFixed(5)}, Lng: ${pm.point?.lng.toFixed(5)}</div>
-            <div style="margin-top: 10px;">
+            <div style="margin-top: 10px; display: flex; gap: 8px; flex-wrap: wrap;">
               <a href="${url}" target="_blank" style="display: inline-block; background: #2563eb; color: #fff; text-decoration: none; padding: 6px 12px; border-radius: 6px; font-size: 13px; font-weight: bold;">
                 🧭 Abrir Rota no Google Maps
+              </a>
+              <a href="${waUrl}" target="_blank" style="display: inline-block; background: #16a34a; color: #fff; text-decoration: none; padding: 6px 12px; border-radius: 6px; font-size: 13px; font-weight: bold;">
+                💬 Enviar no WhatsApp
               </a>
             </div>
             <div style="font-size: 10px; color: #94a3b8; margin-top: 6px; word-break: break-all;">${url}</div>
@@ -473,7 +482,7 @@ export function PrintModal({
                   </div>
                 </div>
 
-                {/* Direct route action */}
+                {/* Direct route & WhatsApp actions */}
                 <div className="pt-2 border-t border-slate-100 flex flex-col gap-1.5">
                   <a
                     href={getMapsUrl(activePlacemark)}
@@ -486,8 +495,19 @@ export function PrintModal({
                     <ExternalLink className="w-3 h-3 ml-auto text-blue-200" />
                   </a>
 
+                  <a
+                    href={createWhatsAppUrl(activePlacemark)}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="w-full py-2 px-3 rounded-lg bg-emerald-600 hover:bg-emerald-700 text-white font-semibold text-xs flex items-center justify-center gap-2 shadow-xs transition-colors cursor-pointer"
+                  >
+                    <MessageSquare className="w-3.5 h-3.5" />
+                    <span>Enviar dados no WhatsApp</span>
+                    <ExternalLink className="w-3 h-3 ml-auto text-emerald-200" />
+                  </a>
+
                   <p className="text-[10px] text-slate-400 leading-tight">
-                    💡 O link abre o Google Maps diretamente traçando a rota a partir do local onde você estiver (GPS atual).
+                    💡 O WhatsApp abre com resumo formatado, categoria, coordenadas e link direto para rota no GPS.
                   </p>
                 </div>
               </div>
@@ -603,11 +623,23 @@ export function PrintModal({
                           target="_blank"
                           rel="noopener noreferrer"
                           onClick={(e) => e.stopPropagation()}
-                          className="px-2.5 py-1.5 rounded-lg bg-blue-50 hover:bg-blue-100 text-blue-700 text-xs font-semibold flex items-center gap-1 transition-colors"
+                          className="px-2 py-1.5 rounded-lg bg-blue-50 hover:bg-blue-100 text-blue-700 text-xs font-semibold flex items-center gap-1 transition-colors"
                           title="Abrir rota no Google Maps"
                         >
                           <Navigation className="w-3 h-3 rotate-45 text-blue-600" />
                           <span className="hidden sm:inline">Rota</span>
+                        </a>
+
+                        <a
+                          href={createWhatsAppUrl(pm)}
+                          target="_blank"
+                          rel="noopener noreferrer"
+                          onClick={(e) => e.stopPropagation()}
+                          className="px-2 py-1.5 rounded-lg bg-emerald-50 hover:bg-emerald-100 text-emerald-700 text-xs font-semibold flex items-center gap-1 transition-colors"
+                          title="Enviar dados desta localidade no WhatsApp"
+                        >
+                          <MessageSquare className="w-3 h-3 text-emerald-600" />
+                          <span className="hidden sm:inline">WhatsApp</span>
                         </a>
                       </div>
                     </div>
